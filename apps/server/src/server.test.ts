@@ -266,7 +266,7 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const response = yield* Effect.promise(() => fetch(url, { redirect: "manual" }));
 
       assert.equal(response.status, 302);
-      assert.equal(response.headers.get("location"), "http://127.0.0.1:5173/");
+      assert.equal(response.headers.get("location"), "http://127.0.0.1:5173/foo/bar");
     }).pipe(Effect.provide(NodeHttpServer.layerTest)),
   );
 

@@ -90,7 +90,8 @@ export const staticAndDevRouteLayer = HttpRouter.add(
 
     const config = yield* ServerConfig;
     if (config.devUrl) {
-      return HttpServerResponse.redirect(config.devUrl.href, { status: 302 });
+      const devTarget = new URL(`${url.pathname}${url.search}`, config.devUrl);
+      return HttpServerResponse.redirect(devTarget.href, { status: 302 });
     }
 
     if (!config.staticDir) {
