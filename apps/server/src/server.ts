@@ -1,14 +1,7 @@
-import * as Net from "node:net";
-import * as Http from "node:http";
-
-import * as NodeHttpServer from "@effect/platform-node/NodeHttpServer";
-import * as NodeServices from "@effect/platform-node/NodeServices";
-import * as BunServices from "@effect/platform-bun/BunServices";
-import * as BunHttpServer from "@effect/platform-bun/BunHttpServer";
-import { Effect, Layer, Path } from "effect";
+import { Effect, Layer } from "effect";
 import { FetchHttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 
-import { ServerConfig, ServerConfigShape } from "./config";
+import { ServerConfig } from "./config";
 import { attachmentsRouteLayer, healthRouteLayer, staticAndDevRouteLayer } from "./http";
 import { fixPath } from "./os-jank";
 import { websocketRpcRouteLayer } from "./ws";
@@ -21,6 +14,7 @@ import { makeEventNdjsonLogger } from "./provider/Layers/EventNdjsonLogger";
 import { ProviderSessionDirectoryLive } from "./provider/Layers/ProviderSessionDirectory";
 import { ProviderSessionRuntimeRepositoryLive } from "./persistence/Layers/ProviderSessionRuntime";
 import { makeCodexAdapterLive } from "./provider/Layers/CodexAdapter";
+import { makeClaudeAdapterLive } from "./provider/Layers/ClaudeAdapter";
 import { ProviderAdapterRegistryLive } from "./provider/Layers/ProviderAdapterRegistry";
 import { makeProviderServiceLive } from "./provider/Layers/ProviderService";
 import { OrchestrationEngineLive } from "./orchestration/Layers/OrchestrationEngine";
@@ -31,12 +25,9 @@ import { CheckpointDiffQueryLive } from "./checkpointing/Layers/CheckpointDiffQu
 import { OrchestrationProjectionSnapshotQueryLive } from "./orchestration/Layers/ProjectionSnapshotQuery";
 import { CheckpointStoreLive } from "./checkpointing/Layers/CheckpointStore";
 import { GitCoreLive } from "./git/Layers/GitCore";
-import { GitServiceLive } from "./git/Layers/GitService";
 import { GitHubCliLive } from "./git/Layers/GitHubCli";
 import { CodexTextGenerationLive } from "./git/Layers/CodexTextGeneration";
 import { TerminalManagerLive } from "./terminal/Layers/Manager";
-import { BunPtyAdapterLive } from "./terminal/Layers/BunPTY";
-import { NodePtyAdapterLive } from "./terminal/Layers/NodePTY";
 import { GitManagerLive } from "./git/Layers/GitManager";
 import { KeybindingsLive } from "./keybindings";
 import { ServerLoggerLive } from "./serverLogger";
@@ -46,6 +37,54 @@ import { RuntimeReceiptBusLive } from "./orchestration/Layers/RuntimeReceiptBus"
 import { ProviderRuntimeIngestionLive } from "./orchestration/Layers/ProviderRuntimeIngestion";
 import { ProviderCommandReactorLive } from "./orchestration/Layers/ProviderCommandReactor";
 import { CheckpointReactorLive } from "./orchestration/Layers/CheckpointReactor";
+
+const PtyAdapterLive = Layer.unwrap(
+  Effect.gen(function* () {
+    if (typeof Bun !== "undefined") {
+      const BunPTY = yield* Effect.promise(() => import("./terminal/Layers/BunPTY"));
+      return BunPTY.layer;
+    } else {
+      const NodePTY = yield* Effect.promise(() => import("./terminal/Layers/NodePTY"));
+      return NodePTY.layer;
+    }
+  }),
+);
+
+const HttpServerLive = Layer.unwrap(
+  Effect.gen(function* () {
+    const config = yield* ServerConfig;
+    if (typeof Bun !== "undefined") {
+      const BunHttpServer = yield* Effect.promise(
+        () => import("@effect/platform-bun/BunHttpServer"),
+      );
+      return BunHttpServer.layer({
+        port: config.port,
+        ...(config.host ? { hostname: config.host } : {}),
+      });
+    } else {
+      const [NodeHttpServer, NodeHttp] = yield* Effect.all([
+        Effect.promise(() => import("@effect/platform-node/NodeHttpServer")),
+        Effect.promise(() => import("node:http")),
+      ]);
+      return NodeHttpServer.layer(NodeHttp.createServer, {
+        host: config.host,
+        port: config.port,
+      });
+    }
+  }),
+);
+
+const PlatformServicesLive = Layer.unwrap(
+  Effect.gen(function* () {
+    if (typeof Bun !== "undefined") {
+      const { layer } = yield* Effect.promise(() => import("@effect/platform-bun/BunServices"));
+      return layer;
+    } else {
+      const { layer } = yield* Effect.promise(() => import("@effect/platform-node/NodeServices"));
+      return layer;
+    }
+  }),
+);
 
 const ReactorLayerLive = Layer.empty.pipe(
   Layer.provideMerge(OrchestrationReactorLive),
@@ -70,10 +109,7 @@ const CheckpointingLayerLive = Layer.empty.pipe(
 
 const ProviderLayerLive = Layer.unwrap(
   Effect.gen(function* () {
-    const { stateDir } = yield* ServerConfig;
-    const path = yield* Path.Path;
-    const providerLogsDir = path.join(stateDir, "logs", "provider");
-    const providerEventLogPath = path.join(providerLogsDir, "events.log");
+    const { providerEventLogPath } = yield* ServerConfig;
     const nativeEventLogger = yield* makeEventNdjsonLogger(providerEventLogPath, {
       stream: "native",
     });
@@ -86,8 +122,12 @@ const ProviderLayerLive = Layer.unwrap(
     const codexAdapterLayer = makeCodexAdapterLive(
       nativeEventLogger ? { nativeEventLogger } : undefined,
     );
+    const claudeAdapterLayer = makeClaudeAdapterLive(
+      nativeEventLogger ? { nativeEventLogger } : undefined,
+    );
     const adapterRegistryLayer = ProviderAdapterRegistryLive.pipe(
       Layer.provide(codexAdapterLayer),
+      Layer.provide(claudeAdapterLayer),
       Layer.provideMerge(providerSessionDirectoryLayer),
     );
     return makeProviderServiceLive(
@@ -99,22 +139,19 @@ const ProviderLayerLive = Layer.unwrap(
 const PersistenceLayerLive = Layer.empty.pipe(Layer.provideMerge(SqlitePersistenceLayerLive));
 
 const GitLayerLive = Layer.empty.pipe(
-  Layer.provideMerge(GitManagerLive),
-  Layer.provideMerge(GitCoreLive),
-  Layer.provideMerge(GitServiceLive),
-  Layer.provideMerge(GitHubCliLive),
-  Layer.provideMerge(CodexTextGenerationLive),
-);
-
-const TerminalLayerLive = TerminalManagerLive.pipe(
-  Layer.provide(
-    typeof Bun !== "undefined" && process.platform !== "win32"
-      ? BunPtyAdapterLive
-      : NodePtyAdapterLive,
+  Layer.provideMerge(
+    GitManagerLive.pipe(
+      Layer.provideMerge(GitCoreLive),
+      Layer.provideMerge(GitHubCliLive),
+      Layer.provideMerge(CodexTextGenerationLive),
+    ),
   ),
+  Layer.provideMerge(GitCoreLive),
 );
 
-const runtimeServicesLayer = Layer.empty.pipe(
+const TerminalLayerLive = TerminalManagerLive.pipe(Layer.provide(PtyAdapterLive));
+
+const RuntimeServicesLive = Layer.empty.pipe(
   Layer.provideMerge(ServerRuntimeStartupLive),
   Layer.provideMerge(ReactorLayerLive),
 
@@ -133,20 +170,6 @@ const runtimeServicesLayer = Layer.empty.pipe(
   Layer.provideMerge(ProviderHealthLive),
   Layer.provideMerge(ServerLifecycleEventsLive),
 );
-
-const HttpServerLive =
-  typeof Bun !== "undefined"
-    ? (listenOptions: ServerConfigShape) =>
-        BunHttpServer.layer({
-          port: listenOptions.port,
-          ...(listenOptions.host ? { hostname: listenOptions.host } : {}),
-        })
-    : (listenOptions: ServerConfigShape) =>
-        NodeHttpServer.layer(Http.createServer, {
-          host: listenOptions.host,
-          port: listenOptions.port,
-        });
-const ServicesLive = typeof Bun !== "undefined" ? BunServices.layer : NodeServices.layer;
 
 export const makeRoutesLayer = Layer.mergeAll(
   healthRouteLayer,
@@ -177,11 +200,11 @@ export const makeServerLayer = Layer.unwrap(
     );
 
     return serverApplicationLayer.pipe(
-      Layer.provideMerge(runtimeServicesLayer),
-      Layer.provideMerge(HttpServerLive(config)),
+      Layer.provideMerge(RuntimeServicesLive),
+      Layer.provideMerge(HttpServerLive),
       Layer.provide(ServerLoggerLive),
       Layer.provideMerge(FetchHttpClient.layer),
-      Layer.provideMerge(ServicesLive),
+      Layer.provideMerge(PlatformServicesLive),
     );
   }),
 );

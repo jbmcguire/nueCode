@@ -24,7 +24,7 @@ import { HttpClient, HttpRouter, HttpServer } from "effect/unstable/http";
 import { RpcClient, RpcSerialization } from "effect/unstable/rpc";
 
 import type { ServerConfigShape } from "./config.ts";
-import { ServerConfig } from "./config.ts";
+import { deriveServerPaths, ServerConfig } from "./config.ts";
 import { makeRoutesLayer } from "./server.ts";
 import { resolveAttachmentRelativePath } from "./attachmentPaths.ts";
 import {
@@ -111,25 +111,27 @@ const buildAppUnderTest = (options?: {
 }) =>
   Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
-    const path = yield* Path.Path;
-    const tempStateDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-test-" });
-    const stateDir = options?.config?.stateDir ?? tempStateDir;
-    const layerConfig = Layer.succeed(ServerConfig, {
+    const tempBaseDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-router-test-" });
+    const baseDir = options?.config?.baseDir ?? tempBaseDir;
+    const devUrl = options?.config?.devUrl;
+    const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+    const config = {
       logLevel: "Info",
       mode: "web",
       port: 0,
       host: "127.0.0.1",
       cwd: process.cwd(),
-      keybindingsConfigPath: path.join(stateDir, "keybindings.json"),
-      stateDir,
+      baseDir,
+      ...derivedPaths,
       staticDir: undefined,
-      devUrl: undefined,
+      devUrl,
       noBrowser: true,
       authToken: undefined,
       autoBootstrapProjectFromCwd: false,
       logWebSocketEvents: false,
       ...options?.config,
-    } satisfies ServerConfigShape);
+    } satisfies ServerConfigShape;
+    const layerConfig = Layer.succeed(ServerConfig, config);
 
     const appLayer = HttpRouter.serve(makeRoutesLayer, {
       disableListenLog: true,
@@ -221,7 +223,7 @@ const buildAppUnderTest = (options?: {
     );
 
     yield* Layer.build(appLayer);
-    return stateDir;
+    return config;
   });
 
 const wsRpcProtocolLayer = (wsUrl: string) =>
@@ -300,9 +302,9 @@ it.layer(NodeServices.layer)("server router seam", (it) => {
       const path = yield* Path.Path;
       const attachmentId = "thread-11111111-1111-4111-8111-111111111111";
 
-      const stateDir = yield* buildAppUnderTest();
+      const config = yield* buildAppUnderTest();
       const attachmentPath = resolveAttachmentRelativePath({
-        stateDir,
+        attachmentsDir: config.attachmentsDir,
         relativePath: `${attachmentId}.bin`,
       });
       assert.isNotNull(attachmentPath, "Attachment path should be resolvable");

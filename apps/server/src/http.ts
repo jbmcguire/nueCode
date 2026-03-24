@@ -39,11 +39,11 @@ export const attachmentsRouteLayer = HttpRouter.add(
       !normalizedRelativePath.includes("/") && !normalizedRelativePath.includes(".");
     const filePath = isIdLookup
       ? resolveAttachmentPathById({
-          stateDir: config.stateDir,
+          attachmentsDir: config.attachmentsDir,
           attachmentId: normalizedRelativePath,
         })
       : resolveAttachmentRelativePath({
-          stateDir: config.stateDir,
+          attachmentsDir: config.attachmentsDir,
           relativePath: normalizedRelativePath,
         });
     if (!filePath) {

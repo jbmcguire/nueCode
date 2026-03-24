@@ -88,7 +88,7 @@ export const normalizeDispatchCommand = (command: ClientOrchestrationCommand) =>
           };
 
           const attachmentPath = resolveAttachmentPath({
-            stateDir: serverConfig.stateDir,
+            attachmentsDir: serverConfig.attachmentsDir,
             attachment: persistedAttachment,
           });
           if (!attachmentPath) {
