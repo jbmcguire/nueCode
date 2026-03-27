@@ -36,6 +36,13 @@ export class TextGenerationError extends Schema.TaggedErrorClass<TextGenerationE
   {
     operation: Schema.String,
     detail: Schema.String,
+    commandOutput: Schema.optional(
+      Schema.Struct({
+        stdout: Schema.optional(Schema.String),
+        stderr: Schema.optional(Schema.String),
+        exitCode: Schema.optional(Schema.Number),
+      }),
+    ),
     cause: Schema.optional(Schema.Defect),
   },
 ) {

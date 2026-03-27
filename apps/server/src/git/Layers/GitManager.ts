@@ -1268,13 +1268,15 @@ export const makeGitManager = Effect.gen(function* () {
 
       return yield* runAction.pipe(
         Effect.catch((error) =>
-          progress
-            .emit({
+          Effect.gen(function* () {
+            yield* Effect.logError("Failed to run action:", error);
+            yield* progress.emit({
               kind: "action_failed",
               phase: currentPhase,
               message: error.message,
-            })
-            .pipe(Effect.flatMap(() => Effect.fail(error))),
+            });
+            return yield* Effect.fail(error);
+          }),
         ),
       );
     },
