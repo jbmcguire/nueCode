@@ -9,8 +9,6 @@ import {
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
-  type ServerConfigStreamEvent,
-  type ServerLifecycleStreamEvent,
   type ThreadId,
   type WsWelcomePayload,
   WS_METHODS,
@@ -34,6 +32,7 @@ import { isMacPlatform } from "../lib/utils";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
 import { useStore } from "../store";
+import { BrowserWsRpcHarness, type NormalizedWsRpcRequestBody } from "../test/wsRpcHarness";
 import { estimateTimelineMessageHeight } from "./timelineHeight";
 import { DEFAULT_CLIENT_SETTINGS } from "@t3tools/contracts/settings";
 
@@ -44,18 +43,6 @@ const NOW_ISO = "2026-03-04T12:00:00.000Z";
 const BASE_TIME_MS = Date.parse(NOW_ISO);
 const ATTACHMENT_SVG = "<svg xmlns='http://www.w3.org/2000/svg' width='120' height='300'></svg>";
 
-interface WsRequestEnvelope {
-  _tag: "Request";
-  id: string;
-  tag: string;
-  payload: unknown;
-}
-
-type NormalizedWsRequestBody = {
-  _tag: string;
-  [key: string]: unknown;
-};
-
 interface TestFixture {
   snapshot: OrchestrationReadModel;
   serverConfig: ServerConfig;
@@ -63,10 +50,9 @@ interface TestFixture {
 }
 
 let fixture: TestFixture;
-const wsRequests: NormalizedWsRequestBody[] = [];
-let customWsRpcResolver: ((body: NormalizedWsRequestBody) => unknown | undefined) | null = null;
-let wsClient: { send: (message: string) => void } | null = null;
-const streamRequestIds = new Map<string, string>();
+const rpcHarness = new BrowserWsRpcHarness();
+const wsRequests = rpcHarness.requests;
+let customWsRpcResolver: ((body: NormalizedWsRpcRequestBody) => unknown | undefined) | null = null;
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
 interface ViewportSpec {
@@ -377,22 +363,20 @@ function createThreadCreatedEvent(threadId: ThreadId, sequence: number): Orchest
 }
 
 function sendOrchestrationDomainEvent(event: OrchestrationEvent): void {
-  sendStreamChunk(WS_METHODS.subscribeOrchestrationDomainEvents, event);
+  rpcHarness.emitStreamValue(WS_METHODS.subscribeOrchestrationDomainEvents, event);
 }
 
-async function waitForWsClient(): Promise<{ send: (message: string) => void }> {
-  let client: { send: (message: string) => void } | null = null;
+async function waitForWsClient(): Promise<void> {
   await vi.waitFor(
     () => {
-      client = wsClient;
-      expect(client).toBeTruthy();
+      expect(
+        wsRequests.some(
+          (request) => request._tag === WS_METHODS.subscribeOrchestrationDomainEvents,
+        ),
+      ).toBe(true);
     },
     { timeout: 8_000, interval: 16 },
   );
-  if (!client) {
-    throw new Error("WebSocket client not connected");
-  }
-  return client;
 }
 
 async function promoteDraftThreadViaDomainEvent(threadId: ThreadId): Promise<void> {
@@ -508,7 +492,7 @@ function createSnapshotWithLongProposedPlan(): OrchestrationReadModel {
   };
 }
 
-function resolveWsRpc(body: NormalizedWsRequestBody): unknown {
+function resolveWsRpc(body: NormalizedWsRpcRequestBody): unknown {
   const customResult = customWsRpcResolver?.(body);
   if (customResult !== undefined) {
     return customResult;
@@ -574,85 +558,13 @@ function resolveWsRpc(body: NormalizedWsRequestBody): unknown {
   return {};
 }
 
-function normalizeWsRequestBody(request: WsRequestEnvelope): NormalizedWsRequestBody {
-  const payload =
-    request.payload && typeof request.payload === "object" && !Array.isArray(request.payload)
-      ? request.payload
-      : {};
-  return {
-    _tag: request.tag,
-    ...payload,
-  };
-}
-
-function sendStreamChunk(method: string, value: unknown) {
-  if (!wsClient) {
-    throw new Error("WebSocket client not connected");
-  }
-  const requestId = streamRequestIds.get(method);
-  if (!requestId) {
-    throw new Error(`Missing stream subscription for ${method}`);
-  }
-  wsClient.send(
-    JSON.stringify({
-      _tag: "Chunk",
-      requestId,
-      values: [value],
-    }),
-  );
-}
-
 const worker = setupWorker(
   wsLink.addEventListener("connection", ({ client }) => {
-    wsClient = client;
-    streamRequestIds.clear();
+    void rpcHarness.connect(client);
     client.addEventListener("message", (event) => {
       const rawData = event.data;
       if (typeof rawData !== "string") return;
-      let request: WsRequestEnvelope;
-      try {
-        request = JSON.parse(rawData) as WsRequestEnvelope;
-      } catch {
-        return;
-      }
-      if (request._tag !== "Request" || typeof request.tag !== "string") return;
-      if (
-        request.tag === WS_METHODS.subscribeServerLifecycle ||
-        request.tag === WS_METHODS.subscribeServerConfig ||
-        request.tag === WS_METHODS.subscribeGitActionProgress ||
-        request.tag === WS_METHODS.subscribeOrchestrationDomainEvents ||
-        request.tag === WS_METHODS.subscribeTerminalEvents
-      ) {
-        streamRequestIds.set(request.tag, request.id);
-        if (request.tag === WS_METHODS.subscribeServerLifecycle) {
-          sendStreamChunk(request.tag, {
-            version: 1,
-            sequence: 1,
-            type: "welcome",
-            payload: fixture.welcome,
-          } satisfies ServerLifecycleStreamEvent);
-        }
-        if (request.tag === WS_METHODS.subscribeServerConfig) {
-          sendStreamChunk(request.tag, {
-            version: 1,
-            type: "snapshot",
-            config: fixture.serverConfig,
-          } satisfies ServerConfigStreamEvent);
-        }
-        return;
-      }
-      const body = normalizeWsRequestBody(request);
-      wsRequests.push(body);
-      client.send(
-        JSON.stringify({
-          _tag: "Exit",
-          requestId: request.id,
-          exit: {
-            _tag: "Success",
-            value: resolveWsRpc(body),
-          },
-        }),
-      );
+      void rpcHarness.onMessage(rawData);
     });
   }),
   http.get("*/attachments/:attachmentId", () =>
@@ -763,7 +675,9 @@ async function waitForInteractionModeButton(
 async function waitForServerConfigToApply(): Promise<void> {
   await vi.waitFor(
     () => {
-      expect(streamRequestIds.has(WS_METHODS.subscribeServerConfig)).toBe(true);
+      expect(wsRequests.some((request) => request._tag === WS_METHODS.subscribeServerConfig)).toBe(
+        true,
+      );
     },
     { timeout: 8_000, interval: 16 },
   );
@@ -901,7 +815,7 @@ async function mountChatView(options: {
   viewport: ViewportSpec;
   snapshot: OrchestrationReadModel;
   configureFixture?: (fixture: TestFixture) => void;
-  resolveRpc?: (body: NormalizedWsRequestBody) => unknown | undefined;
+  resolveRpc?: (body: NormalizedWsRpcRequestBody) => unknown | undefined;
 }): Promise<MountedChatView> {
   fixture = buildFixture(options.snapshot);
   options.configureFixture?.(fixture);
@@ -983,10 +897,36 @@ describe("ChatView timeline estimator parity (full app)", () => {
   });
 
   afterAll(async () => {
+    await rpcHarness.disconnect();
     await worker.stop();
   });
 
   beforeEach(async () => {
+    await rpcHarness.reset({
+      resolveUnary: resolveWsRpc,
+      getInitialStreamValues: (request) => {
+        if (request._tag === WS_METHODS.subscribeServerLifecycle) {
+          return [
+            {
+              version: 1,
+              sequence: 1,
+              type: "welcome",
+              payload: fixture.welcome,
+            },
+          ];
+        }
+        if (request._tag === WS_METHODS.subscribeServerConfig) {
+          return [
+            {
+              version: 1,
+              type: "snapshot",
+              config: fixture.serverConfig,
+            },
+          ];
+        }
+        return [];
+      },
+    });
     __resetNativeApiForTests();
     await setViewport(DEFAULT_VIEWPORT);
     localStorage.clear();

@@ -6,8 +6,6 @@ import {
   type OrchestrationReadModel,
   type ProjectId,
   type ServerConfig,
-  type ServerConfigStreamEvent,
-  type ServerLifecycleStreamEvent,
   type ThreadId,
   type WsWelcomePayload,
   WS_METHODS,
@@ -22,6 +20,7 @@ import { useComposerDraftStore } from "../composerDraftStore";
 import { __resetNativeApiForTests } from "../nativeApi";
 import { getRouter } from "../router";
 import { useStore } from "../store";
+import { BrowserWsRpcHarness } from "../test/wsRpcHarness";
 
 const THREAD_ID = "thread-kb-toast-test" as ThreadId;
 const PROJECT_ID = "project-1" as ProjectId;
@@ -33,16 +32,8 @@ interface TestFixture {
   welcome: WsWelcomePayload;
 }
 
-interface WsRpcRequestEnvelope {
-  _tag: "Request";
-  id: string;
-  tag: string;
-  payload: unknown;
-}
-
 let fixture: TestFixture;
-let wsClient: { send: (data: string) => void } | null = null;
-const streamRequestIds = new Map<string, string>();
+const rpcHarness = new BrowserWsRpcHarness();
 
 const wsLink = ws.link(/ws(s)?:\/\/.*/);
 
@@ -186,70 +177,13 @@ function resolveWsRpc(tag: string): unknown {
   return {};
 }
 
-function sendStreamChunk(method: string, value: unknown) {
-  if (!wsClient) throw new Error("WebSocket client not connected");
-  const requestId = streamRequestIds.get(method);
-  if (!requestId) {
-    throw new Error(`Missing stream subscription for ${method}`);
-  }
-  wsClient.send(
-    JSON.stringify({
-      _tag: "Chunk",
-      requestId,
-      values: [value],
-    }),
-  );
-}
-
 const worker = setupWorker(
   wsLink.addEventListener("connection", ({ client }) => {
-    wsClient = client;
-    streamRequestIds.clear();
+    void rpcHarness.connect(client);
     client.addEventListener("message", (event) => {
       const rawData = event.data;
       if (typeof rawData !== "string") return;
-      let request: WsRpcRequestEnvelope;
-      try {
-        request = JSON.parse(rawData) as WsRpcRequestEnvelope;
-      } catch {
-        return;
-      }
-      if (request._tag !== "Request" || typeof request.tag !== "string") return;
-      if (
-        request.tag === WS_METHODS.subscribeServerLifecycle ||
-        request.tag === WS_METHODS.subscribeServerConfig ||
-        request.tag === WS_METHODS.subscribeGitActionProgress ||
-        request.tag === WS_METHODS.subscribeOrchestrationDomainEvents ||
-        request.tag === WS_METHODS.subscribeTerminalEvents
-      ) {
-        streamRequestIds.set(request.tag, request.id);
-        if (request.tag === WS_METHODS.subscribeServerLifecycle) {
-          sendStreamChunk(request.tag, {
-            version: 1,
-            sequence: 1,
-            type: "welcome",
-            payload: fixture.welcome,
-          } satisfies ServerLifecycleStreamEvent);
-        }
-        if (request.tag === WS_METHODS.subscribeServerConfig) {
-          sendStreamChunk(request.tag, {
-            version: 1,
-            type: "snapshot",
-            config: fixture.serverConfig,
-          } satisfies ServerConfigStreamEvent);
-        }
-        return;
-      }
-      client.send(
-        JSON.stringify({
-          _tag: "Exit",
-          requestId: request.id,
-          exit: {
-            _tag: "Success",
-            value: resolveWsRpc(request.tag),
-          },
-        }),
-      );
+      void rpcHarness.onMessage(rawData);
     });
   }),
   http.get("*/attachments/:attachmentId", () => new HttpResponse(null, { status: 204 })),
@@ -257,11 +191,11 @@ const worker = setupWorker(
 );
 
 function sendServerConfigUpdatedPush(issues: ServerConfig["issues"]) {
-  sendStreamChunk(WS_METHODS.subscribeServerConfig, {
+  rpcHarness.emitStreamValue(WS_METHODS.subscribeServerConfig, {
     version: 1,
     type: "keybindingsUpdated",
     payload: { issues },
-  } satisfies ServerConfigStreamEvent);
+  });
 }
 
 function queryToastTitles(): string[] {
@@ -345,10 +279,36 @@ describe("Keybindings update toast", () => {
   });
 
   afterAll(async () => {
+    await rpcHarness.disconnect();
     await worker.stop();
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
+    await rpcHarness.reset({
+      resolveUnary: (request) => resolveWsRpc(request._tag),
+      getInitialStreamValues: (request) => {
+        if (request._tag === WS_METHODS.subscribeServerLifecycle) {
+          return [
+            {
+              version: 1,
+              sequence: 1,
+              type: "welcome",
+              payload: fixture.welcome,
+            },
+          ];
+        }
+        if (request._tag === WS_METHODS.subscribeServerConfig) {
+          return [
+            {
+              version: 1,
+              type: "snapshot",
+              config: fixture.serverConfig,
+            },
+          ];
+        }
+        return [];
+      },
+    });
     __resetNativeApiForTests();
     localStorage.clear();
     document.body.innerHTML = "";
