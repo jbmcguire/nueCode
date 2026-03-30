@@ -1,4 +1,15 @@
-import { Effect, FileSystem, Layer, Option, Path, PubSub, Ref, Schema, Stream } from "effect";
+import {
+  Effect,
+  FileSystem,
+  Layer,
+  Option,
+  Path,
+  PubSub,
+  Queue,
+  Ref,
+  Schema,
+  Stream,
+} from "effect";
 import {
   type GitActionProgressEvent,
   OrchestrationDispatchCommandError,
@@ -277,18 +288,11 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       [WS_METHODS.terminalRestart]: (input) => terminalManager.restart(input),
       [WS_METHODS.terminalClose]: (input) => terminalManager.close(input),
       [WS_METHODS.subscribeTerminalEvents]: (_input) =>
-        Stream.unwrap(
-          Effect.gen(function* () {
-            const pubsub = yield* PubSub.unbounded<TerminalEvent>();
-            const unsubscribe = yield* terminalManager.subscribe((event) =>
-              Effect.sync(() => {
-                PubSub.publishUnsafe(pubsub, event);
-              }),
-            );
-            return Stream.fromPubSub(pubsub).pipe(
-              Stream.ensuring(Effect.sync(() => unsubscribe())),
-            );
-          }),
+        Stream.callback<TerminalEvent>((queue) =>
+          Effect.acquireRelease(
+            terminalManager.subscribe((event) => Queue.offer(queue, event)),
+            (unsubscribe) => Effect.sync(unsubscribe),
+          ),
         ),
       [WS_METHODS.subscribeGitActionProgress]: (_input) =>
         Stream.fromPubSub(gitActionProgressPubSub),
