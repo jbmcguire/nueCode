@@ -32,6 +32,7 @@ import {
   PubSub,
   Ref,
   Schema,
+  SchemaIssue,
   Scope,
   ServiceMap,
   Stream,
@@ -313,14 +314,16 @@ const makeServerSettings = Effect.gen(function* () {
       writeSemaphore.withPermits(1)(
         Effect.gen(function* () {
           const current = yield* getSettingsFromCache;
-          const decoded = Schema.decodeUnknownExit(ServerSettings)(deepMerge(current, patch));
-          if (decoded._tag === "Failure") {
-            return yield* new ServerSettingsError({
-              settingsPath: "<memory>",
-              detail: "failed to normalize server settings",
-            });
-          }
-          const next = decoded.value;
+          const next = yield* Schema.decodeEffect(ServerSettings)(deepMerge(current, patch)).pipe(
+            Effect.mapError(
+              (cause) =>
+                new ServerSettingsError({
+                  settingsPath: "<memory>",
+                  detail: `failed to normalize server settings: ${SchemaIssue.makeFormatterDefault()(cause.issue)}`,
+                  cause,
+                }),
+            ),
+          );
           yield* writeSettingsAtomically(next);
           yield* Cache.set(settingsCache, cacheKey, next);
           yield* emitChange(next);
