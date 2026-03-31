@@ -21,6 +21,7 @@ import {
 } from "@t3tools/contracts";
 import {
   Cache,
+  Cause,
   Deferred,
   Duration,
   Effect,
@@ -317,7 +318,8 @@ const makeServerSettings = Effect.gen(function* () {
           if (decoded._tag === "Failure") {
             return yield* new ServerSettingsError({
               settingsPath: "<memory>",
-              detail: "failed to normalize server settings",
+              detail: Cause.pretty(decoded.cause),
+              cause: decoded.cause,
             });
           }
           const next = decoded.value;

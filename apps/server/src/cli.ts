@@ -104,7 +104,7 @@ interface CliServerFlags {
 }
 
 const resolveBooleanFlag = (flag: Option.Option<boolean>, envValue: boolean) =>
-  Option.getOrElse(Option.filter(flag, Boolean), () => envValue);
+  Option.getOrElse(flag, () => envValue);
 
 export const resolveServerConfig = (
   flags: CliServerFlags,
