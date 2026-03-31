@@ -88,8 +88,6 @@ export class ServerSettingsService extends ServiceMap.Service<
     );
 }
 
-export { ServerSettingsError };
-
 const ServerSettingsJson = fromLenientJson(ServerSettings);
 
 const PROVIDER_ORDER: readonly ProviderKind[] = ["codex", "claudeAgent"];
