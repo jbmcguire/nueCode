@@ -21,7 +21,6 @@ import {
   ProjectSearchEntriesError,
   ProjectWriteFileError,
   OrchestrationReplayEventsError,
-  ServerSettingsError as ServerSettingsRpcError,
   type TerminalEvent,
   WS_METHODS,
   WsRpcGroup,
@@ -42,10 +41,7 @@ import { ProjectionSnapshotQuery } from "./orchestration/Services/ProjectionSnap
 import { ProviderRegistry } from "./provider/Services/ProviderRegistry";
 import { ServerLifecycleEvents } from "./serverLifecycleEvents";
 import { ServerRuntimeStartup } from "./serverRuntimeStartup";
-import {
-  ServerSettingsError as ServerSettingsServiceError,
-  ServerSettingsService,
-} from "./serverSettings";
+import { ServerSettingsService } from "./serverSettings";
 import { TerminalManager } from "./terminal/Services/Manager";
 import { resolveWorkspaceWritePath, searchWorkspaceEntries } from "./workspaceEntries";
 
@@ -71,19 +67,10 @@ const WsRpcLayer = WsRpcGroup.toLayer(
       PubSub.shutdown,
     );
 
-    const mapServerSettingsError = (cause: ServerSettingsServiceError) =>
-      new ServerSettingsRpcError({
-        settingsPath: cause.settingsPath,
-        detail: cause.detail,
-        ...(cause.cause ? { cause: cause.cause } : {}),
-      });
-
     const loadServerConfig = Effect.gen(function* () {
       const keybindingsConfig = yield* keybindings.loadConfigState;
       const providers = yield* providerRegistry.getProviders;
-      const settings = yield* serverSettings.getSettings.pipe(
-        Effect.mapError(mapServerSettingsError),
-      );
+      const settings = yield* serverSettings.getSettings;
 
       return {
         cwd: config.cwd,
@@ -221,10 +208,8 @@ const WsRpcLayer = WsRpcGroup.toLayer(
           const keybindingsConfig = yield* keybindings.upsertKeybindingRule(rule);
           return { keybindings: keybindingsConfig, issues: [] };
         }),
-      [WS_METHODS.serverGetSettings]: (_input) =>
-        serverSettings.getSettings.pipe(Effect.mapError(mapServerSettingsError)),
-      [WS_METHODS.serverUpdateSettings]: ({ patch }) =>
-        serverSettings.updateSettings(patch).pipe(Effect.mapError(mapServerSettingsError)),
+      [WS_METHODS.serverGetSettings]: (_input) => serverSettings.getSettings,
+      [WS_METHODS.serverUpdateSettings]: ({ patch }) => serverSettings.updateSettings(patch),
       [WS_METHODS.projectsSearchEntries]: (input) =>
         Effect.tryPromise({
           try: () => searchWorkspaceEntries(input),
