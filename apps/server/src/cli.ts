@@ -17,8 +17,10 @@ import { runServer } from "./server";
 
 const PortSchema = Schema.Int.check(Schema.isBetween({ minimum: 1, maximum: 65535 }));
 
+const isRuntimeMode = Schema.is(RuntimeMode);
+
 const BootstrapEnvelopeSchema = Schema.Struct({
-  mode: Schema.optional(RuntimeMode),
+  mode: Schema.optional(Schema.String),
   port: Schema.optional(PortSchema),
   host: Schema.optional(Schema.String),
   t3Home: Schema.optional(Schema.String),
@@ -148,7 +150,9 @@ export const resolveServerConfig = (
       resolveOptionPrecedence(
         flags.mode,
         Option.fromUndefinedOr(env.mode),
-        Option.flatMap(bootstrapEnvelope, (bootstrap) => Option.fromUndefinedOr(bootstrap.mode)),
+        Option.flatMap(bootstrapEnvelope, (bootstrap) =>
+          Option.filter(Option.fromUndefinedOr(bootstrap.mode), isRuntimeMode),
+        ),
       ),
       () => "web",
     );
