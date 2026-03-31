@@ -1941,11 +1941,10 @@ export const makeGitCore = Effect.fn("makeGitCore")(function* (options?: {
       });
 
       // Refresh upstream refs in the background so checkout remains responsive.
-      yield* Effect.sync(() => {
-        Effect.runFork(
-          refreshCheckedOutBranchUpstream(input.cwd).pipe(Effect.ignoreCause({ log: true })),
-        );
-      });
+      yield* refreshCheckedOutBranchUpstream(input.cwd).pipe(
+        Effect.ignoreCause({ log: true }),
+        Effect.forkDetach({ startImmediately: true }),
+      );
     },
   );
 
