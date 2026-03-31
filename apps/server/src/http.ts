@@ -9,6 +9,11 @@ import {
 } from "./attachmentPaths";
 import { resolveAttachmentPathById } from "./attachmentStore";
 import { ServerConfig } from "./config";
+import {
+  FALLBACK_PROJECT_FAVICON_SVG,
+  PROJECT_FAVICON_CACHE_CONTROL,
+  resolveProjectFaviconFilePath,
+} from "./projectFavicon";
 
 const HEALTH_ROUTE_PATH = "/health";
 
@@ -75,6 +80,45 @@ export const attachmentsRouteLayer = HttpRouter.add(
         "Cache-Control": "public, max-age=31536000, immutable",
       },
     });
+  }),
+);
+
+export const projectFaviconRouteLayer = HttpRouter.add(
+  "GET",
+  "/api/project-favicon",
+  Effect.gen(function* () {
+    const request = yield* HttpServerRequest.HttpServerRequest;
+    const url = HttpServerRequest.toURL(request);
+    if (Option.isNone(url)) {
+      return HttpServerResponse.text("Bad Request", { status: 400 });
+    }
+
+    const projectCwd = url.value.searchParams.get("cwd");
+    if (!projectCwd) {
+      return HttpServerResponse.text("Missing cwd parameter", { status: 400 });
+    }
+
+    const faviconFilePath = yield* Effect.promise(() => resolveProjectFaviconFilePath(projectCwd));
+    if (!faviconFilePath) {
+      return HttpServerResponse.text(FALLBACK_PROJECT_FAVICON_SVG, {
+        status: 200,
+        contentType: "image/svg+xml",
+        headers: {
+          "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
+        },
+      });
+    }
+
+    return yield* HttpServerResponse.file(faviconFilePath, {
+      status: 200,
+      headers: {
+        "Cache-Control": PROJECT_FAVICON_CACHE_CONTROL,
+      },
+    }).pipe(
+      Effect.catch(() =>
+        Effect.succeed(HttpServerResponse.text("Internal Server Error", { status: 500 })),
+      ),
+    );
   }),
 );
 

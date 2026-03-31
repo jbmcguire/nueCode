@@ -5,6 +5,7 @@ import { Command, Flag, GlobalFlag } from "effect/unstable/cli";
 import {
   DEFAULT_PORT,
   deriveServerPaths,
+  ensureServerDirectories,
   resolveStaticDir,
   ServerConfig,
   RuntimeMode,
@@ -188,6 +189,7 @@ export const resolveServerConfig = (
       ),
     );
     const derivedPaths = yield* deriveServerPaths(baseDir, devUrl);
+    yield* ensureServerDirectories(derivedPaths);
     const noBrowser = resolveBooleanFlag(
       flags.noBrowser,
       Option.getOrElse(

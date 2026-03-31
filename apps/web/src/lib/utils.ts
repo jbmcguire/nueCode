@@ -50,6 +50,7 @@ export const resolveServerUrl = (options?: {
   url?: string | undefined;
   protocol?: "http" | "https" | "ws" | "wss" | undefined;
   pathname?: string | undefined;
+  searchParams?: Record<string, string> | undefined;
 }): string => {
   const rawUrl = firstNonEmptyString(
     options?.url,
@@ -66,6 +67,9 @@ export const resolveServerUrl = (options?: {
     parsedUrl.pathname = options.pathname;
   } else {
     parsedUrl.pathname = "/";
+  }
+  if (options?.searchParams) {
+    parsedUrl.search = new URLSearchParams(options.searchParams).toString();
   }
   return parsedUrl.toString();
 };
