@@ -1,0 +1,23 @@
+{
+  "scripts": {
+    "setup": "bun install",
+    "archive": "rm -rf node_modules apps/*/node_modules packages/*/node_modules .turbo apps/*/.turbo packages/*/.turbo"
+  },
+  "preview": {
+    "url": "http://localhost:5173"
+  },
+  "tasks": [
+    {
+      "label": "Typecheck, lint & format",
+      "prompt": "Run `bun typecheck`, `bun lint`, and `bun fmt` in sequence. Report and fix any issues found."
+    },
+    {
+      "label": "Run tests",
+      "prompt": "Run `bun run test` and report results. Fix any failing tests."
+    },
+    {
+      "label": "Security review",
+      "prompt": "Review recent changes for security vulnerabilities including XSS, injection, WebSocket auth issues, and OWASP top 10 concerns."
+    }
+  ]
+}
