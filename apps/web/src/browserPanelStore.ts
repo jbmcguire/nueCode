@@ -2,7 +2,7 @@ import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
 import { createDebouncedStorage, createMemoryStorage } from "./lib/storage";
 
-const BROWSER_PANEL_STORAGE_KEY = "t3code:browser-panel:v1";
+const BROWSER_PANEL_STORAGE_KEY = "nuecode:browser-panel:v1";
 const BROWSER_PANEL_STORAGE_VERSION = 1;
 const BROWSER_PANEL_PERSIST_DEBOUNCE_MS = 300;
 

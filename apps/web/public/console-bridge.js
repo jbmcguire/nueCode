@@ -1,8 +1,8 @@
 /**
- * T3 Code Console Bridge
+ * nueCode Console Bridge
  *
  * Add this script to your dev server's HTML to capture console output
- * in the T3 Code browser panel.
+ * in the nueCode browser panel.
  *
  * Usage: <script src="http://localhost:YOUR_T3_PORT/console-bridge.js"></script>
  */
@@ -12,7 +12,7 @@
   if (window.__t3ConsoleBridgeInstalled) return;
   window.__t3ConsoleBridgeInstalled = true;
 
-  var SOURCE = "t3-console-bridge";
+  var SOURCE = "nuecode-console-bridge";
   var LEVELS = ["log", "info", "warn", "error", "debug"];
   var MAX_ARG_LENGTH = 2048;
 

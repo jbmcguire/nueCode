@@ -130,7 +130,7 @@ const makeCursorTextGeneration = Effect.gen(function* () {
         cursorSettings,
         childProcessSpawner: commandSpawner,
         cwd,
-        clientInfo: { name: "t3-code-git-text", version: "0.0.0" },
+        clientInfo: { name: "nuecode-git-text", version: "0.0.0" },
       });
 
       yield* runtime.handleSessionUpdate((notification) => {

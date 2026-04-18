@@ -20,7 +20,7 @@ export interface ConsoleEntry {
 type ConsoleFilter = "all" | "error" | "warn" | "info";
 
 const MAX_ENTRIES = 500;
-const CONSOLE_BRIDGE_SOURCE = "t3-console-bridge";
+const CONSOLE_BRIDGE_SOURCE = "nuecode-console-bridge";
 
 let entryIdCounter = 0;
 

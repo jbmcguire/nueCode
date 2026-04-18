@@ -29,7 +29,7 @@ import {
   BrowserPanelLoadingState,
 } from "./BrowserPanelShell";
 
-const CONSOLE_BRIDGE_SOURCE = "t3-console-bridge";
+const CONSOLE_BRIDGE_SOURCE = "nuecode-console-bridge";
 
 interface BrowserState {
   currentUrl: string;

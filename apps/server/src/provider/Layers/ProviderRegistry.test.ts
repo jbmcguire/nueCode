@@ -40,7 +40,7 @@ import { ServerConfig } from "../../config.ts";
 import { ServerSettingsService, type ServerSettingsShape } from "../../serverSettings.ts";
 import { ProviderRegistry } from "../Services/ProviderRegistry.ts";
 
-process.env.T3CODE_CURSOR_ENABLED = "1";
+process.env.NUECODE_CURSOR_ENABLED = "1";
 
 // ── Test helpers ────────────────────────────────────────────────────
 
@@ -152,7 +152,7 @@ function withTempCodexHome(configContent?: string) {
   return Effect.gen(function* () {
     const fileSystem = yield* FileSystem.FileSystem;
     const path = yield* Path.Path;
-    const tmpDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "t3-test-codex-" });
+    const tmpDir = yield* fileSystem.makeTempDirectoryScoped({ prefix: "nuecode-test-codex-" });
 
     yield* Effect.acquireRelease(
       Effect.sync(() => {
@@ -386,7 +386,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             const fileSystem = yield* FileSystem.FileSystem;
             const path = yield* Path.Path;
             const binDir = yield* fileSystem.makeTempDirectoryScoped({
-              prefix: "t3-test-codex-bin-",
+              prefix: "nuecode-test-codex-bin-",
             });
             const codexPath = path.join(binDir, "codex");
             yield* fileSystem.writeFileString(
@@ -408,7 +408,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
             );
             yield* fileSystem.chmod(codexPath, 0o755);
             const customCodexHome = yield* fileSystem.makeTempDirectoryScoped({
-              prefix: "t3-test-codex-home-",
+              prefix: "nuecode-test-codex-home-",
             });
             const previousPath = process.env.PATH;
             process.env.PATH = binDir;
@@ -460,7 +460,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.auth.status, "unknown");
           assert.strictEqual(
             status.message,
-            "Codex CLI v0.36.0 is too old for T3 Code. Upgrade to v0.37.0 or newer and restart T3 Code.",
+            "Codex CLI v0.36.0 is too old for nueCode. Upgrade to v0.37.0 or newer and restart nueCode.",
           );
         }).pipe(
           Effect.provide(
@@ -888,7 +888,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
               assert.strictEqual(cursorProvider?.status, "disabled");
               assert.strictEqual(
                 cursorProvider?.message,
-                "Cursor is disabled in T3 Code settings.",
+                "Cursor is disabled in nueCode settings.",
               );
               assert.strictEqual(cursorSpawned, false);
             }).pipe(Effect.provide(runtimeServices));
@@ -914,7 +914,7 @@ it.layer(Layer.mergeAll(NodeServices.layer, ServerSettingsService.layerTest()))(
           assert.strictEqual(status.enabled, false);
           assert.strictEqual(status.status, "disabled");
           assert.strictEqual(status.installed, false);
-          assert.strictEqual(status.message, "Codex is disabled in T3 Code settings.");
+          assert.strictEqual(status.message, "Codex is disabled in nueCode settings.");
         }),
       );
     });

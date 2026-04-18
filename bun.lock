@@ -42,10 +42,10 @@
       },
     },
     "apps/server": {
-      "name": "t3",
+      "name": "nuecode",
       "version": "0.0.20",
       "bin": {
-        "t3": "./dist/bin.mjs",
+        "nuecode": "./dist/bin.mjs",
       },
       "dependencies": {
         "@anthropic-ai/claude-agent-sdk": "^0.2.111",

@@ -1,11 +1,11 @@
-# T3 Code
+# nueCode
 
-T3 Code is a minimal web GUI for coding agents (currently Codex and Claude, more coming soon).
+nueCode is a minimal web GUI for coding agents (currently Codex and Claude, more coming soon).
 
 ## Installation
 
 > [!WARNING]
-> T3 Code currently supports Codex and Claude.
+> nueCode currently supports Codex and Claude.
 > Install and authenticate at least one provider before use:
 >
 > - Codex: install [Codex CLI](https://github.com/openai/codex) and run `codex login`
@@ -14,29 +14,29 @@ T3 Code is a minimal web GUI for coding agents (currently Codex and Claude, more
 ### Run without installing
 
 ```bash
-npx t3
+npx nuecode
 ```
 
 ### Desktop app
 
-Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/t3code/releases), or from your favorite package registry:
+Install the latest version of the desktop app from [GitHub Releases](https://github.com/pingdotgg/nuecode/releases), or from your favorite package registry:
 
 #### Windows (`winget`)
 
 ```bash
-winget install T3Tools.T3Code
+winget install T3Tools.NueCode
 ```
 
 #### macOS (Homebrew)
 
 ```bash
-brew install --cask t3-code
+brew install --cask nuecode
 ```
 
 #### Arch Linux (AUR)
 
 ```bash
-yay -S t3code-bin
+yay -S nuecode-bin
 ```
 
 ## Some notes
@@ -54,8 +54,18 @@ Before local development, prepare the environment and install dependencies:
 ```bash
 # Optional: only needed if you use mise for dev tool management.
 mise install
-bun install .
+bun run setup
 ```
+
+Common run scripts:
+
+```bash
+bun run run:web
+bun run run:server
+bun run run:desktop
+```
+
+The setup step creates `.env.local` from `.env.example` with project-scoped defaults for local state and auto-bootstrap behavior.
 
 Read [CONTRIBUTING.md](./CONTRIBUTING.md) before opening an issue or PR.
 
