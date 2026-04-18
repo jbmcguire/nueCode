@@ -3058,6 +3058,69 @@ describe("ChatView timeline estimator parity (full app)", () => {
     }
   });
 
+  it("opens and closes the browser panel from a draft thread route", async () => {
+    const draftId = DraftId.make("draft-browser-panel-regression");
+    useComposerDraftStore.setState({
+      draftThreadsByThreadKey: {
+        [draftId]: {
+          threadId: THREAD_ID,
+          environmentId: LOCAL_ENVIRONMENT_ID,
+          projectId: PROJECT_ID,
+          logicalProjectKey: PROJECT_DRAFT_KEY,
+          createdAt: NOW_ISO,
+          runtimeMode: "full-access",
+          interactionMode: "default",
+          branch: null,
+          worktreePath: null,
+          envMode: "local",
+        },
+      },
+      logicalProjectDraftThreadKeyByLogicalProjectKey: {
+        [PROJECT_DRAFT_KEY]: draftId,
+      },
+    });
+
+    const mounted = await mountChatView({
+      viewport: DEFAULT_VIEWPORT,
+      snapshot: createDraftOnlySnapshot(),
+      initialPath: `/draft/${draftId}`,
+    });
+
+    try {
+      const browserToggle = await waitForElement(
+        () =>
+          document.querySelector<HTMLButtonElement>('button[aria-label="Toggle inspector panel"]'),
+        "Unable to find browser toggle button.",
+      );
+      browserToggle.click();
+
+      await vi.waitFor(
+        () => {
+          expect(mounted.router.state.location.pathname).toBe(`/draft/${draftId}`);
+          expect(mounted.router.state.location.search.inspector).toBe("1");
+          expect(document.querySelector('button[aria-label="Close inspector panel"]')).toBeTruthy();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+
+      const closeButton = document.querySelector<HTMLButtonElement>(
+        'button[aria-label="Close inspector panel"]',
+      );
+      expect(closeButton).toBeTruthy();
+      closeButton?.click();
+
+      await vi.waitFor(
+        () => {
+          expect(mounted.router.state.location.pathname).toBe(`/draft/${draftId}`);
+          expect(mounted.router.state.location.search.inspector).toBeUndefined();
+        },
+        { timeout: 8_000, interval: 16 },
+      );
+    } finally {
+      await mounted.cleanup();
+    }
+  });
+
   it("surrounds selected plain text and preserves the inner selection for repeated wrapping", async () => {
     const mounted = await mountChatView({
       viewport: DEFAULT_VIEWPORT,

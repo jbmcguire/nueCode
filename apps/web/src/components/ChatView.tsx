@@ -38,8 +38,7 @@ import { usePrimaryEnvironmentId } from "../environments/primary";
 import { readEnvironmentApi } from "../environmentApi";
 import { isElectron } from "../env";
 import { readLocalApi } from "../localApi";
-import { parseDiffRouteSearch, stripDiffSearchParams } from "../diffRouteSearch";
-import { parseBrowserRouteSearch, stripBrowserSearchParams } from "../browserRouteSearch";
+import { type InspectorTab, parseInspectorRouteSearch } from "../inspectorRouteSearch";
 import {
   collapseExpandedComposerCursor,
   parseStandaloneComposerSlashCommand,
@@ -92,6 +91,7 @@ import {
 } from "../types";
 import { useTheme } from "../hooks/useTheme";
 import { useTurnDiffSummaries } from "../hooks/useTurnDiffSummaries";
+import { useDevServerDetection } from "../hooks/useDevServerDetection";
 import { useCommandPaletteStore } from "../commandPaletteStore";
 import { buildTemporaryWorktreeBranchName } from "@t3tools/shared/git";
 import { useMediaQuery } from "../hooks/useMediaQuery";
@@ -617,9 +617,9 @@ export default function ChatView(props: ChatViewProps) {
   );
   const timestampFormat = settings.timestampFormat;
   const navigate = useNavigate();
-  const rawSearch = useSearch({
+  const inspectorSearch = useSearch({
     strict: false,
-    select: (params) => ({ ...parseDiffRouteSearch(params), ...parseBrowserRouteSearch(params) }),
+    select: (params) => parseInspectorRouteSearch(params),
   });
   const { resolvedTheme } = useTheme();
   // Granular store selectors — avoid subscribing to prompt changes.
@@ -791,8 +791,9 @@ export default function ChatView(props: ChatViewProps) {
     composerInteractionMode ?? activeThread?.interactionMode ?? DEFAULT_INTERACTION_MODE;
   const isLocalDraftThread = !isServerThread && localDraftThread !== undefined;
   const canCheckoutPullRequestIntoThread = isLocalDraftThread;
-  const diffOpen = rawSearch.diff === "1";
-  const browserOpen = rawSearch.browser === "1";
+  const inspectorOpen = inspectorSearch.inspector === "1";
+  const inspectorTab = inspectorSearch.inspectorTab ?? "preview";
+  useDevServerDetection(environmentId, threadId);
   const activeThreadId = activeThread?.id ?? null;
   const activeThreadRef = useMemo(
     () => (activeThread ? scopeThreadRef(activeThread.environmentId, activeThread.id) : null),
@@ -1480,43 +1481,78 @@ export default function ChatView(props: ChatViewProps) {
     () => shortcutLabelForCommand(keybindings, "browser.toggle", nonTerminalShortcutLabelOptions),
     [keybindings, nonTerminalShortcutLabelOptions],
   );
+  const inspectorTooltipLabel = useMemo(() => {
+    const shortcutParts = [
+      browserPanelShortcutLabel ? `Preview: ${browserPanelShortcutLabel}` : null,
+      isGitRepo && diffPanelShortcutLabel ? `Changes: ${diffPanelShortcutLabel}` : null,
+    ].filter((value): value is string => value !== null);
+
+    if (shortcutParts.length === 0) {
+      return "Toggle inspector panel";
+    }
+
+    return `Toggle inspector panel. ${shortcutParts.join(" | ")}`;
+  }, [browserPanelShortcutLabel, diffPanelShortcutLabel, isGitRepo]);
+
+  const updateInspectorTab = useCallback(
+    (tab: InspectorTab, shouldOpen: boolean) => {
+      if (routeKind === "draft") {
+        if (!draftId) {
+          return;
+        }
+        void navigate({
+          to: "/draft/$draftId",
+          params: { draftId },
+          replace: true,
+          search: (previous) => ({
+            ...previous,
+            inspector: shouldOpen ? "1" : undefined,
+            inspectorTab: tab,
+          }),
+        });
+        return;
+      }
+
+      if (!isServerThread) {
+        return;
+      }
+
+      void navigate({
+        to: "/$environmentId/$threadId",
+        params: {
+          environmentId,
+          threadId,
+        },
+        replace: true,
+        search: (previous) => ({
+          ...previous,
+          inspector: shouldOpen ? "1" : undefined,
+          inspectorTab: tab,
+        }),
+      });
+    },
+    [draftId, environmentId, isServerThread, navigate, routeKind, threadId],
+  );
+
+  const onToggleInspector = useCallback(() => {
+    updateInspectorTab(inspectorTab, !inspectorOpen);
+  }, [inspectorOpen, inspectorTab, updateInspectorTab]);
+
   const onToggleDiff = useCallback(() => {
     if (!isServerThread) {
       return;
     }
-    if (!diffOpen) {
+    const shouldOpen = !inspectorOpen || inspectorTab !== "changes";
+    if (shouldOpen) {
       onDiffPanelOpen?.();
     }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: (previous) => {
-        const rest = stripDiffSearchParams(previous);
-        return diffOpen ? { ...rest, diff: undefined } : { ...rest, diff: "1" };
-      },
-    });
-  }, [diffOpen, environmentId, isServerThread, navigate, onDiffPanelOpen, threadId]);
+    updateInspectorTab("changes", shouldOpen);
+  }, [inspectorOpen, inspectorTab, isServerThread, onDiffPanelOpen, updateInspectorTab]);
+
   const onToggleBrowser = useCallback(() => {
-    if (!isServerThread) {
-      return;
-    }
-    void navigate({
-      to: "/$environmentId/$threadId",
-      params: {
-        environmentId,
-        threadId,
-      },
-      replace: true,
-      search: (previous) => {
-        const rest = stripBrowserSearchParams(previous);
-        return browserOpen ? { ...rest, browser: undefined } : { ...rest, browser: "1" };
-      },
-    });
-  }, [browserOpen, environmentId, isServerThread, navigate, threadId]);
+    const shouldOpen = !inspectorOpen || inspectorTab !== "preview";
+    updateInspectorTab("preview", shouldOpen);
+  }, [inspectorOpen, inspectorTab, updateInspectorTab]);
 
   const envLocked = Boolean(
     activeThread &&
@@ -3204,12 +3240,13 @@ export default function ChatView(props: ChatViewProps) {
           environmentId,
           threadId,
         },
-        search: (previous) => {
-          const rest = stripDiffSearchParams(previous);
-          return filePath
-            ? { ...rest, diff: "1", diffTurnId: turnId, diffFilePath: filePath }
-            : { ...rest, diff: "1", diffTurnId: turnId };
-        },
+        search: (previous) => ({
+          ...previous,
+          inspector: "1",
+          inspectorTab: "changes",
+          diffTurnId: turnId,
+          diffFilePath: filePath,
+        }),
       });
     },
     [environmentId, isServerThread, navigate, onDiffPanelOpen, threadId],
@@ -3265,11 +3302,9 @@ export default function ChatView(props: ChatViewProps) {
           terminalAvailable={activeProject !== undefined}
           terminalOpen={terminalState.terminalOpen}
           terminalToggleShortcutLabel={terminalToggleShortcutLabel}
-          diffToggleShortcutLabel={diffPanelShortcutLabel}
-          browserToggleShortcutLabel={browserPanelShortcutLabel}
+          inspectorTooltipLabel={inspectorTooltipLabel}
           gitCwd={gitCwd}
-          diffOpen={diffOpen}
-          browserOpen={browserOpen}
+          inspectorOpen={inspectorOpen}
           onRunProjectScript={(script) => {
             void runProjectScript(script);
           }}
@@ -3277,8 +3312,7 @@ export default function ChatView(props: ChatViewProps) {
           onUpdateProjectScript={updateProjectScript}
           onDeleteProjectScript={deleteProjectScript}
           onToggleTerminal={toggleTerminalVisibility}
-          onToggleDiff={onToggleDiff}
-          onToggleBrowser={onToggleBrowser}
+          onToggleInspector={onToggleInspector}
         />
       </header>
 

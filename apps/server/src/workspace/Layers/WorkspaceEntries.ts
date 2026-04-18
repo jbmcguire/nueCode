@@ -4,7 +4,11 @@ import type { Dirent } from "node:fs";
 
 import { Cache, Duration, Effect, Exit, Layer, Option, Path } from "effect";
 
-import { type FilesystemBrowseInput, type ProjectEntry } from "@t3tools/contracts";
+import {
+  type FilesystemBrowseInput,
+  type ProjectEntry,
+  type ProjectListEntriesResult,
+} from "@t3tools/contracts";
 import { isExplicitRelativePath, isWindowsAbsolutePath } from "@t3tools/shared/path";
 import {
   insertRankedSearchResult,
@@ -422,6 +426,66 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
     },
   );
 
+  const listEntries: WorkspaceEntriesShape["listEntries"] = Effect.fn(
+    "WorkspaceEntries.listEntries",
+  )(function* (input) {
+    const normalizedCwd = yield* normalizeWorkspaceRoot(input.cwd);
+    const directoryTarget = input.relativePath
+      ? yield* workspacePaths
+          .resolveRelativePathWithinRoot({
+            workspaceRoot: normalizedCwd,
+            relativePath: input.relativePath,
+          })
+          .pipe(
+            Effect.mapError(
+              (cause) =>
+                new WorkspaceEntriesError({
+                  cwd: input.cwd,
+                  operation: "workspaceEntries.listEntries.resolveRelativePathWithinRoot",
+                  detail: cause.message,
+                  cause,
+                }),
+            ),
+          )
+      : { absolutePath: normalizedCwd, relativePath: undefined };
+
+    const dirents = yield* Effect.tryPromise({
+      try: () => fsPromises.readdir(directoryTarget.absolutePath, { withFileTypes: true }),
+      catch: (cause) =>
+        new WorkspaceEntriesError({
+          cwd: input.cwd,
+          operation: "workspaceEntries.listEntries",
+          detail: cause instanceof Error ? cause.message : String(cause),
+          cause,
+        }),
+    });
+
+    const entries: ProjectListEntriesResult["entries"] = dirents
+      .filter((dirent) => dirent.isDirectory() || dirent.isFile())
+      .filter((dirent) => !(dirent.isDirectory() && IGNORED_DIRECTORY_NAMES.has(dirent.name)))
+      .map((dirent) => {
+        const relativePath = directoryTarget.relativePath
+          ? toPosixPath(path.join(directoryTarget.relativePath, dirent.name))
+          : dirent.name;
+        return {
+          name: dirent.name,
+          relativePath,
+          kind: dirent.isDirectory() ? "directory" : "file",
+        } as const;
+      })
+      .toSorted((left, right) => {
+        if (left.kind !== right.kind) {
+          return left.kind === "directory" ? -1 : 1;
+        }
+        return left.name.localeCompare(right.name);
+      });
+
+    return {
+      ...(directoryTarget.relativePath ? { directoryPath: directoryTarget.relativePath } : {}),
+      entries,
+    };
+  });
+
   const browse: WorkspaceEntriesShape["browse"] = Effect.fn("WorkspaceEntries.browse")(
     function* (input) {
       const resolvedInputPath = yield* resolveBrowseTarget(input, path);
@@ -500,6 +564,7 @@ export const makeWorkspaceEntries = Effect.gen(function* () {
   return {
     browse,
     invalidate,
+    listEntries,
     search,
   } satisfies WorkspaceEntriesShape;
 });

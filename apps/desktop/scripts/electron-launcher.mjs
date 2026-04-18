@@ -128,6 +128,40 @@ function readJson(path) {
   }
 }
 
+function resolveElectronPackagePaths() {
+  const require = createRequire(import.meta.url);
+  const electronPackageJsonPath = require.resolve("electron/package.json");
+  const electronPackageDir = dirname(electronPackageJsonPath);
+  return {
+    require,
+    electronPackageDir,
+    installScriptPath: join(electronPackageDir, "install.js"),
+    executablePathMarker: join(electronPackageDir, "path.txt"),
+  };
+}
+
+function ensureElectronBinaryInstalled() {
+  const { electronPackageDir, executablePathMarker, installScriptPath } =
+    resolveElectronPackagePaths();
+  if (existsSync(executablePathMarker)) {
+    return;
+  }
+
+  const installResult = spawnSync(process.execPath, [installScriptPath], {
+    cwd: electronPackageDir,
+    encoding: "utf8",
+    stdio: "pipe",
+  });
+  if (installResult.status === 0 && existsSync(executablePathMarker)) {
+    return;
+  }
+
+  const details = [installResult.stdout, installResult.stderr].filter(Boolean).join("\n");
+  throw new Error(
+    `Electron binary install is incomplete. Tried to repair it by running ${installScriptPath}, but that failed.${details ? `\n${details}` : ""}`,
+  );
+}
+
 function buildMacLauncher(electronBinaryPath) {
   const sourceAppBundlePath = resolve(electronBinaryPath, "../../..");
   const runtimeDir = join(desktopDir, ".electron-runtime");
@@ -163,7 +197,8 @@ function buildMacLauncher(electronBinaryPath) {
 }
 
 export function resolveElectronPath() {
-  const require = createRequire(import.meta.url);
+  ensureElectronBinaryInstalled();
+  const { require } = resolveElectronPackagePaths();
   const electronBinaryPath = require("electron");
 
   if (process.platform !== "darwin") {

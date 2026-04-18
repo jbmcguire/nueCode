@@ -20,7 +20,7 @@ import { useSearch } from "@tanstack/react-router";
 import { cn } from "~/lib/utils";
 
 import { useBrowserPanelStore } from "../browserPanelStore";
-import { parseBrowserRouteSearch } from "../browserRouteSearch";
+import { parseInspectorRouteSearch } from "../inspectorRouteSearch";
 import { BrowserConsole } from "./browser/BrowserConsole";
 import {
   BrowserPanelShell,
@@ -137,18 +137,23 @@ function normalizeUrl(input: string): string {
 }
 
 interface BrowserPanelProps {
+  embedded?: boolean;
   mode: BrowserPanelMode;
   threadId: string;
   onClose: () => void;
 }
 
-function BrowserPanel({ mode, threadId, onClose }: BrowserPanelProps) {
+function BrowserPanelComponent({ embedded = false, mode, threadId, onClose }: BrowserPanelProps) {
+  const routeSearch = useSearch({
+    strict: false,
+    select: (search) => parseInspectorRouteSearch(search),
+  });
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const urlInputRef = useRef<HTMLInputElement>(null);
   const storeUrl = useBrowserPanelStore((state) => state.getUrl(threadId));
   const setStoreUrl = useBrowserPanelStore((state) => state.setUrl);
-
-  const initialUrl = storeUrl ?? "";
+  const routeUrl = routeSearch.browserUrl;
+  const initialUrl = routeUrl ?? storeUrl ?? "";
 
   const [state, dispatch] = useReducer(browserReducer, {
     currentUrl: initialUrl,
@@ -167,12 +172,23 @@ function BrowserPanel({ mode, threadId, onClose }: BrowserPanelProps) {
     }
   }, [storeUrl, state.currentUrl]);
 
+  useEffect(() => {
+    if (routeUrl && routeUrl !== state.currentUrl && state.currentUrl === "") {
+      dispatch({ type: "navigate", url: routeUrl });
+    }
+  }, [routeUrl, state.currentUrl]);
+
   // Listen for console error messages to show indicator
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
       if (typeof event.data !== "object" || event.data === null) return;
       if (event.data.source !== CONSOLE_BRIDGE_SOURCE) return;
-      if (event.data.level === "error") {
+      if (
+        event.data.level === "error" ||
+        (event.data.type === "network" &&
+          typeof event.data.ok === "boolean" &&
+          event.data.ok === false)
+      ) {
         dispatch({ type: "set_console_error", hasErrors: true });
       }
       if (event.data.type === "navigation" && typeof event.data.url === "string") {
@@ -292,59 +308,77 @@ function BrowserPanel({ mode, threadId, onClose }: BrowserPanelProps) {
           "relative rounded p-1 transition-colors",
           state.consoleOpen ? "text-foreground" : "text-muted-foreground hover:text-foreground",
         )}
-        aria-label="Toggle console"
+        aria-label="Toggle browser devtools"
       >
         <TerminalSquareIcon className="size-3.5" />
         {state.hasConsoleErrors && !state.consoleOpen && (
           <span className="absolute -right-0.5 -top-0.5 size-1.5 rounded-full bg-red-500" />
         )}
       </button>
-      <button
-        type="button"
-        onClick={onClose}
-        className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
-        aria-label="Close browser panel"
-      >
-        <XIcon className="size-3.5" />
-      </button>
+      {!embedded ? (
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded p-1 text-muted-foreground transition-colors hover:text-foreground"
+          aria-label="Close browser panel"
+        >
+          <XIcon className="size-3.5" />
+        </button>
+      ) : null}
     </>
   );
 
+  const content = (
+    <div className="relative flex min-h-0 flex-1 flex-col">
+      {state.currentUrl.length === 0 ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
+          <GlobeIcon className="size-10 text-muted-foreground/20" />
+          <div className="space-y-1">
+            <p className="text-sm font-medium text-muted-foreground/60">No URL loaded</p>
+            <p className="text-xs text-muted-foreground/40">
+              Enter a URL above or start a dev server in the terminal.
+            </p>
+          </div>
+        </div>
+      ) : (
+        <>
+          <iframe
+            ref={iframeRef}
+            src={state.currentUrl}
+            onLoad={handleIframeLoad}
+            sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
+            className="min-h-0 flex-1 border-none bg-white"
+            title="Browser preview"
+          />
+          {state.isLoading && (
+            <div className="absolute inset-0 flex items-center justify-center bg-background/50">
+              <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
+            </div>
+          )}
+        </>
+      )}
+      {state.consoleOpen && <BrowserConsole className="h-48 shrink-0" />}
+    </div>
+  );
+
+  if (embedded) {
+    return (
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="border-b border-border">
+          <div className="flex items-center gap-1.5 px-2 py-2">{toolbar}</div>
+        </div>
+        {content}
+      </div>
+    );
+  }
+
   return (
     <BrowserPanelShell mode={mode} header={toolbar}>
-      <div className="relative flex min-h-0 flex-1 flex-col">
-        {state.currentUrl.length === 0 ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-3 p-8 text-center">
-            <GlobeIcon className="size-10 text-muted-foreground/20" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-muted-foreground/60">No URL loaded</p>
-              <p className="text-xs text-muted-foreground/40">
-                Enter a URL above or start a dev server in the terminal.
-              </p>
-            </div>
-          </div>
-        ) : (
-          <>
-            <iframe
-              ref={iframeRef}
-              src={state.currentUrl}
-              onLoad={handleIframeLoad}
-              sandbox="allow-scripts allow-same-origin allow-forms allow-popups allow-modals"
-              className="min-h-0 flex-1 border-none bg-white"
-              title="Browser preview"
-            />
-            {state.isLoading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-background/50">
-                <LoaderIcon className="size-5 animate-spin text-muted-foreground" />
-              </div>
-            )}
-          </>
-        )}
-        {state.consoleOpen && <BrowserConsole className="h-48 shrink-0" />}
-      </div>
+      {content}
     </BrowserPanelShell>
   );
 }
 
-export default memo(BrowserPanel);
+export const BrowserPanel = memo(BrowserPanelComponent);
+export default BrowserPanel;
 export { BrowserPanelHeaderSkeleton, BrowserPanelLoadingState };

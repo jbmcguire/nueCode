@@ -9,7 +9,7 @@ import { scopeThreadRef } from "@t3tools/client-runtime";
 import { memo } from "react";
 import GitActionsControl from "../GitActionsControl";
 import { type DraftId } from "~/composerDraftStore";
-import { DiffIcon, GlobeIcon, TerminalSquareIcon } from "lucide-react";
+import { PanelRightIcon, TerminalSquareIcon } from "lucide-react";
 import { Badge } from "../ui/badge";
 import { Tooltip, TooltipPopup, TooltipTrigger } from "../ui/tooltip";
 import ProjectScriptsControl, { type NewProjectScriptInput } from "../ProjectScriptsControl";
@@ -32,18 +32,15 @@ interface ChatHeaderProps {
   terminalAvailable: boolean;
   terminalOpen: boolean;
   terminalToggleShortcutLabel: string | null;
-  diffToggleShortcutLabel: string | null;
-  browserToggleShortcutLabel: string | null;
+  inspectorTooltipLabel: string | null;
   gitCwd: string | null;
-  diffOpen: boolean;
-  browserOpen: boolean;
+  inspectorOpen: boolean;
   onRunProjectScript: (script: ProjectScript) => void;
   onAddProjectScript: (input: NewProjectScriptInput) => Promise<void>;
   onUpdateProjectScript: (scriptId: string, input: NewProjectScriptInput) => Promise<void>;
   onDeleteProjectScript: (scriptId: string) => Promise<void>;
   onToggleTerminal: () => void;
-  onToggleDiff: () => void;
-  onToggleBrowser: () => void;
+  onToggleInspector: () => void;
 }
 
 export const ChatHeader = memo(function ChatHeader({
@@ -61,18 +58,15 @@ export const ChatHeader = memo(function ChatHeader({
   terminalAvailable,
   terminalOpen,
   terminalToggleShortcutLabel,
-  diffToggleShortcutLabel,
+  inspectorTooltipLabel,
   gitCwd,
-  diffOpen,
+  inspectorOpen,
   onRunProjectScript,
   onAddProjectScript,
   onUpdateProjectScript,
   onDeleteProjectScript,
   onToggleTerminal,
-  onToggleDiff,
-  onToggleBrowser,
-  browserOpen,
-  browserToggleShortcutLabel,
+  onToggleInspector,
 }: ChatHeaderProps) {
   return (
     <div className="@container/header-actions flex min-w-0 flex-1 items-center gap-2">
@@ -150,44 +144,18 @@ export const ChatHeader = memo(function ChatHeader({
             render={
               <Toggle
                 className="shrink-0"
-                pressed={browserOpen}
-                onPressedChange={onToggleBrowser}
-                aria-label="Toggle browser panel"
+                pressed={inspectorOpen}
+                onPressedChange={onToggleInspector}
+                aria-label="Toggle inspector panel"
                 variant="outline"
                 size="xs"
               >
-                <GlobeIcon className="size-3" />
+                <PanelRightIcon className="size-3" />
               </Toggle>
             }
           />
           <TooltipPopup side="bottom">
-            {browserToggleShortcutLabel
-              ? `Toggle browser panel (${browserToggleShortcutLabel})`
-              : "Toggle browser panel"}
-          </TooltipPopup>
-        </Tooltip>
-        <Tooltip>
-          <TooltipTrigger
-            render={
-              <Toggle
-                className="shrink-0"
-                pressed={diffOpen}
-                onPressedChange={onToggleDiff}
-                aria-label="Toggle diff panel"
-                variant="outline"
-                size="xs"
-                disabled={!isGitRepo}
-              >
-                <DiffIcon className="size-3" />
-              </Toggle>
-            }
-          />
-          <TooltipPopup side="bottom">
-            {!isGitRepo
-              ? "Diff panel is unavailable because this project is not a git repository."
-              : diffToggleShortcutLabel
-                ? `Toggle diff panel (${diffToggleShortcutLabel})`
-                : "Toggle diff panel"}
+            {inspectorTooltipLabel ?? "Toggle inspector panel"}
           </TooltipPopup>
         </Tooltip>
       </div>

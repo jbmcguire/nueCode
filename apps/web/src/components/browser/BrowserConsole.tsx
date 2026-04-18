@@ -2,6 +2,7 @@ import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 
 import {
   AlertTriangleIcon,
   BanIcon,
+  GlobeIcon,
   InfoIcon,
   TerminalSquareIcon,
   Trash2Icon,
@@ -9,38 +10,25 @@ import {
 } from "lucide-react";
 import { cn } from "~/lib/utils";
 
-export interface ConsoleEntry {
-  id: number;
-  level: "log" | "info" | "warn" | "error" | "debug";
-  args: string[];
-  timestamp: number;
-  url?: string;
-}
+import {
+  type ConsoleEntry,
+  consoleEntryFromMessage,
+  formatNetworkDuration,
+  formatNetworkStatus,
+  getNetworkPathLabel,
+  isConsoleBridgeMessage,
+  isNetworkBridgeMessage,
+  networkEntryFromMessage,
+  type NetworkEntry,
+} from "./browserBridgeEvents";
 
 type ConsoleFilter = "all" | "error" | "warn" | "info";
+type NetworkFilter = "all" | "failed" | "fetch" | "xhr";
+type BrowserTab = "console" | "network";
 
 const MAX_ENTRIES = 500;
-const CONSOLE_BRIDGE_SOURCE = "nuecode-console-bridge";
 
 let entryIdCounter = 0;
-
-interface ConsoleBridgeMessage {
-  source: typeof CONSOLE_BRIDGE_SOURCE;
-  type: "console" | "error";
-  level: ConsoleEntry["level"];
-  args: string[];
-  timestamp: number;
-  url?: string;
-}
-
-function isConsoleBridgeMessage(data: unknown): data is ConsoleBridgeMessage {
-  if (typeof data !== "object" || data === null) return false;
-  const record = data as Record<string, unknown>;
-  return (
-    record.source === CONSOLE_BRIDGE_SOURCE &&
-    (record.type === "console" || record.type === "error")
-  );
-}
 
 function levelIcon(level: ConsoleEntry["level"]) {
   switch (level) {
@@ -114,25 +102,83 @@ const FILTER_OPTIONS: { value: ConsoleFilter; label: string }[] = [
   { value: "info", label: "Info" },
 ];
 
+const NETWORK_FILTER_OPTIONS: { value: NetworkFilter; label: string }[] = [
+  { value: "all", label: "All" },
+  { value: "failed", label: "Failed" },
+  { value: "fetch", label: "Fetch" },
+  { value: "xhr", label: "XHR" },
+];
+
+function matchesNetworkFilter(entry: NetworkEntry, filter: NetworkFilter): boolean {
+  if (filter === "all") return true;
+  if (filter === "failed") return !entry.ok;
+  return entry.kind === filter;
+}
+
+const NetworkEntryRow = memo(function NetworkEntryRow({ entry }: { entry: NetworkEntry }) {
+  return (
+    <div
+      className={cn(
+        "grid grid-cols-[auto_minmax(0,1fr)_auto_auto] items-start gap-2 border-b px-2 py-1 font-mono text-xs leading-relaxed",
+        entry.ok ? "border-border/50" : "bg-red-500/5 border-red-500/20",
+      )}
+    >
+      <span
+        className={cn(
+          "mt-0.5 rounded px-1 py-0.5 text-[10px] font-semibold",
+          entry.kind === "fetch"
+            ? "bg-blue-500/10 text-blue-400"
+            : "bg-emerald-500/10 text-emerald-400",
+        )}
+      >
+        {entry.method}
+      </span>
+      <div className="min-w-0">
+        <div className="truncate text-foreground/80">{getNetworkPathLabel(entry.url)}</div>
+        {entry.errorMessage ? (
+          <div className="truncate text-[10px] text-red-400/90">{entry.errorMessage}</div>
+        ) : null}
+      </div>
+      <span
+        className={cn(
+          "shrink-0 tabular-nums",
+          entry.ok ? "text-muted-foreground/70" : "text-red-400",
+        )}
+      >
+        {formatNetworkStatus(entry)}
+      </span>
+      <span className="shrink-0 text-[10px] tabular-nums text-muted-foreground/60">
+        {formatNetworkDuration(entry.durationMs)}
+      </span>
+    </div>
+  );
+});
+
 export function BrowserConsole(props: { className?: string }) {
   const [entries, setEntries] = useState<ConsoleEntry[]>([]);
+  const [networkEntries, setNetworkEntries] = useState<NetworkEntry[]>([]);
+  const [activeTab, setActiveTab] = useState<BrowserTab>("console");
   const [filter, setFilter] = useState<ConsoleFilter>("all");
+  const [networkFilter, setNetworkFilter] = useState<NetworkFilter>("all");
   const scrollRef = useRef<HTMLDivElement>(null);
   const isUserScrolledUp = useRef(false);
 
   useEffect(() => {
     function handleMessage(event: MessageEvent) {
-      if (!isConsoleBridgeMessage(event.data)) return;
-
-      const newEntry: ConsoleEntry = {
-        id: entryIdCounter++,
-        level: event.data.level,
-        args: event.data.args,
-        timestamp: event.data.timestamp,
-        ...(event.data.url ? { url: event.data.url } : {}),
-      };
-
-      setEntries((previous) => {
+      if (isConsoleBridgeMessage(event.data)) {
+        const newEntry = consoleEntryFromMessage(event.data, entryIdCounter++);
+        setEntries((previous) => {
+          const next = [...previous, newEntry];
+          if (next.length > MAX_ENTRIES) {
+            return next.slice(next.length - MAX_ENTRIES);
+          }
+          return next;
+        });
+        return;
+      }
+      if (!isNetworkBridgeMessage(event.data)) return;
+      const newEntry = networkEntryFromMessage(event.data, entryIdCounter++);
+      setNetworkEntries((previous) => {
         const next = [...previous, newEntry];
         if (next.length > MAX_ENTRIES) {
           return next.slice(next.length - MAX_ENTRIES);
@@ -149,7 +195,7 @@ export function BrowserConsole(props: { className?: string }) {
     const container = scrollRef.current;
     if (!container || isUserScrolledUp.current) return;
     container.scrollTop = container.scrollHeight;
-  }, [entries]);
+  }, [activeTab, entries.length, networkEntries.length, filter, networkFilter]);
 
   const handleScroll = useCallback(() => {
     const container = scrollRef.current;
@@ -160,66 +206,132 @@ export function BrowserConsole(props: { className?: string }) {
   }, []);
 
   const clearEntries = useCallback(() => {
-    setEntries([]);
+    if (activeTab === "console") {
+      setEntries([]);
+    } else {
+      setNetworkEntries([]);
+    }
     isUserScrolledUp.current = false;
-  }, []);
+  }, [activeTab]);
 
   const filteredEntries =
     filter === "all" ? entries : entries.filter((entry) => matchesFilter(entry, filter));
+  const filteredNetworkEntries =
+    networkFilter === "all"
+      ? networkEntries
+      : networkEntries.filter((entry) => matchesNetworkFilter(entry, networkFilter));
   const errorCount = entries.filter((entry) => entry.level === "error").length;
   const warnCount = entries.filter((entry) => entry.level === "warn").length;
+  const failedRequestCount = networkEntries.filter((entry) => !entry.ok).length;
+  const visibleEntryCount =
+    activeTab === "console" ? filteredEntries.length : filteredNetworkEntries.length;
+  const isConsoleTab = activeTab === "console";
 
   return (
     <div className={cn("flex flex-col border-t border-border bg-card/50", props.className)}>
       <div className="flex items-center gap-1 border-b border-border/50 px-2 py-1">
-        <TerminalSquareIcon className="size-3 text-muted-foreground" />
-        <span className="text-[11px] font-medium text-muted-foreground">Console</span>
-        {errorCount > 0 && (
-          <span className="rounded-full bg-red-500/15 px-1.5 text-[10px] font-medium tabular-nums text-red-500">
-            {errorCount}
-          </span>
-        )}
-        {warnCount > 0 && (
-          <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium tabular-nums text-amber-500">
-            {warnCount}
-          </span>
-        )}
+        <button
+          type="button"
+          onClick={() => setActiveTab("console")}
+          className={cn(
+            "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors",
+            isConsoleTab
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <TerminalSquareIcon className="size-3" />
+          <span>Console</span>
+          {errorCount > 0 ? (
+            <span className="rounded-full bg-red-500/15 px-1.5 text-[10px] font-medium tabular-nums text-red-500">
+              {errorCount}
+            </span>
+          ) : warnCount > 0 ? (
+            <span className="rounded-full bg-amber-500/15 px-1.5 text-[10px] font-medium tabular-nums text-amber-500">
+              {warnCount}
+            </span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          onClick={() => setActiveTab("network")}
+          className={cn(
+            "flex items-center gap-1 rounded px-1.5 py-0.5 text-[11px] font-medium transition-colors",
+            !isConsoleTab
+              ? "bg-accent text-foreground"
+              : "text-muted-foreground hover:text-foreground",
+          )}
+        >
+          <GlobeIcon className="size-3" />
+          <span>Network</span>
+          {failedRequestCount > 0 ? (
+            <span className="rounded-full bg-red-500/15 px-1.5 text-[10px] font-medium tabular-nums text-red-500">
+              {failedRequestCount}
+            </span>
+          ) : networkEntries.length > 0 ? (
+            <span className="rounded-full bg-accent px-1.5 text-[10px] font-medium tabular-nums text-muted-foreground">
+              {networkEntries.length}
+            </span>
+          ) : null}
+        </button>
         <div className="flex-1" />
         <div className="flex items-center gap-0.5">
-          {FILTER_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              onClick={() => setFilter(option.value)}
-              className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
-                filter === option.value
-                  ? "bg-accent text-foreground"
-                  : "text-muted-foreground hover:text-foreground",
-              )}
-            >
-              {option.label}
-            </button>
-          ))}
+          {isConsoleTab
+            ? FILTER_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setFilter(option.value)}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                    filter === option.value
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))
+            : NETWORK_FILTER_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setNetworkFilter(option.value)}
+                  className={cn(
+                    "rounded px-1.5 py-0.5 text-[10px] font-medium transition-colors",
+                    networkFilter === option.value
+                      ? "bg-accent text-foreground"
+                      : "text-muted-foreground hover:text-foreground",
+                  )}
+                >
+                  {option.label}
+                </button>
+              ))}
         </div>
         <button
           type="button"
           onClick={clearEntries}
           className="ml-1 rounded p-0.5 text-muted-foreground hover:text-foreground"
-          aria-label="Clear console"
+          aria-label={isConsoleTab ? "Clear console" : "Clear network log"}
         >
           <Trash2Icon className="size-3" />
         </button>
       </div>
       <div ref={scrollRef} onScroll={handleScroll} className="min-h-0 flex-1 overflow-y-auto">
-        {filteredEntries.length === 0 ? (
+        {visibleEntryCount === 0 ? (
           <div className="flex h-full items-center justify-center py-6 text-xs text-muted-foreground/50">
-            {entries.length === 0
-              ? "No console output yet. Add the console bridge script to your app."
-              : "No matching entries."}
+            {isConsoleTab
+              ? entries.length === 0
+                ? "No console output yet. Add the console bridge script to your app."
+                : "No matching console entries."
+              : networkEntries.length === 0
+                ? "No network activity yet. Add the console bridge script to your app."
+                : "No matching network entries."}
           </div>
-        ) : (
+        ) : isConsoleTab ? (
           filteredEntries.map((entry) => <ConsoleEntryRow key={entry.id} entry={entry} />)
+        ) : (
+          filteredNetworkEntries.map((entry) => <NetworkEntryRow key={entry.id} entry={entry} />)
         )}
       </div>
     </div>
