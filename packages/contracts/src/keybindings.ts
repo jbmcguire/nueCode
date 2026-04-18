@@ -1,5 +1,5 @@
 import { Schema } from "effect";
-import { TrimmedString } from "./baseSchemas";
+import { TrimmedString } from "./baseSchemas.ts";
 
 export const MAX_KEYBINDING_VALUE_LENGTH = 64;
 const MAX_KEYBINDING_WHEN_LENGTH = 256;
@@ -34,6 +34,7 @@ const STATIC_KEYBINDING_COMMANDS = [
   "terminal.close",
   "diff.toggle",
   "browser.toggle",
+  "commandPalette.toggle",
   "chat.new",
   "chat.newLocal",
   "editor.openFavorite",

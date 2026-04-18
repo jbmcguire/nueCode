@@ -1,11 +1,11 @@
-import { type ThreadId } from "@t3tools/contracts";
+import { type EnvironmentId, type ThreadId } from "@t3tools/contracts";
 import { useEffect, useRef } from "react";
 
 import { extractLocalhostUrl } from "../devServerDetector";
-import { readNativeApi } from "../nativeApi";
+import { readEnvironmentApi } from "../environmentApi";
 import { useBrowserPanelStore } from "../browserPanelStore";
 
-export function useDevServerDetection(threadId: ThreadId) {
+export function useDevServerDetection(environmentId: EnvironmentId, threadId: ThreadId) {
   const setDetectedUrl = useBrowserPanelStore((state) => state.setDetectedUrl);
   const hasDetectedRef = useRef(false);
 
@@ -14,7 +14,7 @@ export function useDevServerDetection(threadId: ThreadId) {
   }, [threadId]);
 
   useEffect(() => {
-    const api = readNativeApi();
+    const api = readEnvironmentApi(environmentId);
     if (!api) return;
 
     const unsubscribe = api.terminal.onEvent((event) => {
@@ -30,5 +30,5 @@ export function useDevServerDetection(threadId: ThreadId) {
     });
 
     return unsubscribe;
-  }, [threadId, setDetectedUrl]);
+  }, [environmentId, threadId, setDetectedUrl]);
 }
